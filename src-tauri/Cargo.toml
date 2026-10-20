@@ -1,0 +1,18 @@
+[package]
+name = "notia"
+version = "1.1.0"
+edition = "2021"
+[build-dependencies]
+tauri-build = "2"
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"

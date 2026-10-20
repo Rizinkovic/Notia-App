@@ -1,0 +1,5 @@
+MIT License - Copyright (c) 2026 Song Richard (https://srichard.site)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated files, to deal in the software without restriction, including the rights to use, copy, modify, merge, publish, distribute and sell copies, subject to inclusion of this notice.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. Notia stores your notes only on your device.
