@@ -1,7 +1,7 @@
 # Notia — system design & workflow
 
 ## 1. Goals and constraints
-Offline Windows 10/11 note app, lightweight, professional, FR/EN, no Python, no external APIs, no readable source in the shipped product, standard installer, public source repo, mobile version later.
+Offline Windows 10/11 note app, lightweight, professional, FR/EN, no external APIs, no readable source in the shipped product, standard installer, public source repo, mobile version later.
 
 ## 2. Architecture
 ```mermaid
