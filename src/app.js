@@ -8,7 +8,7 @@ if(SEALED)db={lang:PREF.lang||lg,theme:PREF.theme||"light",cats:[],notes:[],todo
 db=db||{lang:lg,theme:"light",cats:L[lg].cats.map((n,i)=>({id:"c"+i,name:n})),notes:[],todos:[]};
 let cat="all",cur=null,tab="notes";const ed=$("#ed"),t=k=>L[db.lang][k],uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 function save(){try{localStorage.notia=JSON.stringify(db);localStorage.notia_pref=JSON.stringify({lang:db.lang,theme:db.theme,priv:PREF.priv})}catch{toast("Storage error")}}
-const addL=S=>{for(const k in S){L.en[k]=S[k][0];L.fr[k]=S[k][1]}},VER="1.2.0",DONATE="https://srichard.site/donate";
+const addL=S=>{for(const k in S){L.en[k]=S[k][0];L.fr[k]=S[k][1]}},VER="1.2.1",DONATE="https://srichard.site/donate";
 let hid=n=>false,gate=async()=>true;
 const p2=v=>String(v).padStart(2,"0"),fd=ts=>{const d=new Date(ts);return p2(d.getDate())+"/"+p2(d.getMonth()+1)+"/"+p2(d.getFullYear()%100)},fdt=ts=>{const d=new Date(ts);return fd(ts)+" "+p2(d.getHours())+":"+p2(d.getMinutes())};
 const ask=m=>new Promise(r=>{const d=document.createElement("dialog");d.innerHTML=`<p>${esc(m)}</p><div class="sg"><button class="pri" id="ay">${t("yes")}</button><button id="an">${t("no")}</button></div>`;document.body.append(d);d.onclose=()=>{d.remove();r(d.returnValue=="y")};d.querySelector("#ay").onclick=()=>d.close("y");d.querySelector("#an").onclick=()=>d.close("n");d.showModal()});
@@ -17,7 +17,7 @@ function toast(m){const e=$("#toast");e.textContent=m;e.style.display="block";se
 function render(){document.documentElement.dataset.theme=db.theme;$$("[data-i]").forEach(e=>e.textContent=t(e.dataset.i));$("#lang").textContent=db.lang.toUpperCase();
 $("#q").placeholder=t("search");$("#ttl").placeholder=t("title");$("#nt").placeholder=t("tdesc");$("#notes").hidden=tab!="notes";$("#tasks").hidden=tab!="tasks";
 $$("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab==tab));
-$("#cats").innerHTML=[{id:"all",name:t("all")},...db.cats].map(c=>`<button data-cat="${c.id}" class="${c.id==cat?"on":""}">${esc(c.name)}${c.id=="all"?"":` <span data-lk="${c.id}">${c.lk?"🔒":"🔓"}</span><span data-dc="${c.id}">✕</span>`}</button>`).join("");list();tasks()}
+$("#cats").innerHTML=[{id:"all",name:t("all")},...db.cats].map(c=>`<button data-cat="${c.id}" class="${c.id==cat?"on":""}">${esc(c.name)}${c.id=="all"?"":` <span data-dc="${c.id}">✕</span>`}</button>`).join("");list();tasks()}
 function list(){const q=$("#q").value.toLowerCase();$("#items").innerHTML=db.notes.filter(n=>!hid(n)&&(cat=="all"||n.cat==cat)&&(n.title+n.html).toLowerCase().includes(q)).sort((a,b)=>b.ts-a.ts)
 .map(n=>`<div class="it ${n.id==cur?"on":""}" data-n="${n.id}">${esc(n.title||t("untitled"))}<small>${fdt(n.ts)}</small></div>`).join("")}
 function open(id){cur=id;const n=cur_();$("#ttl").value=n?n.title:"";ed.innerHTML=n?n.html:"";ed.contentEditable=!!n;list()}
