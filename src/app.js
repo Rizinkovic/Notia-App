@@ -2,18 +2,24 @@ const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],TR=
 const L={en:{notes:"Notes",tasks:"Tasks & Planner",newcat:"+ Category",about:"About",all:"All notes",newnote:"+ New note",search:"Search…",title:"Title",add:"Add",untitled:"Untitled",tdesc:"New task…",close:"Close",by:"Made by",tt:"Terms: Notia is provided “as is”, without warranty. Your notes stay on this device; nothing is sent online.",catname:"Category name",cats:["Prompts","App ideas","Books to read","Movies to watch"],confirm:"Delete?",none:"No date",due:"Reminder"},
 fr:{notes:"Notes",tasks:"Tâches & Planning",newcat:"+ Catégorie",about:"À propos",all:"Toutes les notes",newnote:"+ Nouvelle note",search:"Rechercher…",title:"Titre",add:"Ajouter",untitled:"Sans titre",tdesc:"Nouvelle tâche…",close:"Fermer",by:"Créé par",tt:"Conditions : Notia est fournie « telle quelle », sans garantie. Vos notes restent sur cet appareil ; rien n’est envoyé en ligne.",catname:"Nom de la catégorie",cats:["Prompts","Idées d’apps","Livres à lire","Films à voir"],confirm:"Supprimer ?",none:"Sans date",due:"Rappel"}};
 const lg=navigator.language.startsWith("fr")?"fr":"en";
-let db;try{db=JSON.parse(localStorage.notia)}catch{}
+const FRESH=!localStorage.notia;let db;try{db=JSON.parse(localStorage.notia)}catch{}
+const SEALED=!!db?.sealed,PREF=(()=>{try{return JSON.parse(localStorage.notia_pref)}catch{return{}}})();
+if(SEALED)db={lang:PREF.lang||lg,theme:PREF.theme||"light",cats:[],notes:[],todos:[],tour:1};
 db=db||{lang:lg,theme:"light",cats:L[lg].cats.map((n,i)=>({id:"c"+i,name:n})),notes:[],todos:[]};
 let cat="all",cur=null,tab="notes";const ed=$("#ed"),t=k=>L[db.lang][k],uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
-const save=()=>{try{localStorage.notia=JSON.stringify(db)}catch{toast("Storage error")}};
+function save(){try{localStorage.notia=JSON.stringify(db);localStorage.notia_pref=JSON.stringify({lang:db.lang,theme:db.theme,priv:PREF.priv})}catch{toast("Storage error")}}
+const addL=S=>{for(const k in S){L.en[k]=S[k][0];L.fr[k]=S[k][1]}},VER="1.2.0",DONATE="https://srichard.site/donate";
+let hid=n=>false,gate=async()=>true;
+const p2=v=>String(v).padStart(2,"0"),fd=ts=>{const d=new Date(ts);return p2(d.getDate())+"/"+p2(d.getMonth()+1)+"/"+p2(d.getFullYear()%100)},fdt=ts=>{const d=new Date(ts);return fd(ts)+" "+p2(d.getHours())+":"+p2(d.getMinutes())};
+const ask=m=>new Promise(r=>{const d=document.createElement("dialog");d.innerHTML=`<p>${esc(m)}</p><div class="sg"><button class="pri" id="ay">${t("yes")}</button><button id="an">${t("no")}</button></div>`;document.body.append(d);d.onclose=()=>{d.remove();r(d.returnValue=="y")};d.querySelector("#ay").onclick=()=>d.close("y");d.querySelector("#an").onclick=()=>d.close("n");d.showModal()});
 const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"),cur_=()=>db.notes.find(n=>n.id==cur);
 function toast(m){const e=$("#toast");e.textContent=m;e.style.display="block";setTimeout(()=>e.style.display="none",4000)}
 function render(){document.documentElement.dataset.theme=db.theme;$$("[data-i]").forEach(e=>e.textContent=t(e.dataset.i));$("#lang").textContent=db.lang.toUpperCase();
 $("#q").placeholder=t("search");$("#ttl").placeholder=t("title");$("#nt").placeholder=t("tdesc");$("#notes").hidden=tab!="notes";$("#tasks").hidden=tab!="tasks";
 $$("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab==tab));
-$("#cats").innerHTML=[{id:"all",name:t("all")},...db.cats].map(c=>`<button data-cat="${c.id}" class="${c.id==cat?"on":""}">${esc(c.name)}${c.id=="all"?"":` <span data-dc="${c.id}">✕</span>`}</button>`).join("");list();tasks()}
-function list(){const q=$("#q").value.toLowerCase();$("#items").innerHTML=db.notes.filter(n=>(cat=="all"||n.cat==cat)&&(n.title+n.html).toLowerCase().includes(q)).sort((a,b)=>b.ts-a.ts)
-.map(n=>`<div class="it ${n.id==cur?"on":""}" data-n="${n.id}">${esc(n.title||t("untitled"))}<small>${new Date(n.ts).toLocaleDateString(db.lang)}</small></div>`).join("")}
+$("#cats").innerHTML=[{id:"all",name:t("all")},...db.cats].map(c=>`<button data-cat="${c.id}" class="${c.id==cat?"on":""}">${esc(c.name)}${c.id=="all"?"":` <span data-lk="${c.id}">${c.lk?"🔒":"🔓"}</span><span data-dc="${c.id}">✕</span>`}</button>`).join("");list();tasks()}
+function list(){const q=$("#q").value.toLowerCase();$("#items").innerHTML=db.notes.filter(n=>!hid(n)&&(cat=="all"||n.cat==cat)&&(n.title+n.html).toLowerCase().includes(q)).sort((a,b)=>b.ts-a.ts)
+.map(n=>`<div class="it ${n.id==cur?"on":""}" data-n="${n.id}">${esc(n.title||t("untitled"))}<small>${fdt(n.ts)}</small></div>`).join("")}
 function open(id){cur=id;const n=cur_();$("#ttl").value=n?n.title:"";ed.innerHTML=n?n.html:"";ed.contentEditable=!!n;list()}
 function touch(){const n=cur_();if(!n)return;n.title=$("#ttl").value;n.html=ed.innerHTML;n.ts=Date.now();save();clearTimeout(touch.t);touch.t=setTimeout(list,400)}
 const x=(c,v)=>{ed.focus();document.execCommand(c,false,v);touch()};
@@ -44,17 +50,18 @@ $("#tf").onsubmit=e=>{e.preventDefault();db.todos.push({id:uid(),text:$("#nt").v
 setInterval(()=>db.todos.forEach(o=>{if(o.due&&!o.done&&!o.n&&new Date(o.due)<=new Date()){o.n=1;save();toast("⏰ "+o.text);try{TR.notification.sendNotification({title:"Notia",body:o.text})}catch{}}}),15000);
 try{TR.notification.requestPermission()}catch{}
 document.addEventListener("click",e=>{const g=a=>e.target.closest("["+a+"]")?.getAttribute(a),B=e.target.closest("button");
-if(g("data-dc")){if(confirm(t("confirm"))){const c=g("data-dc");db.cats=db.cats.filter(z=>z.id!=c);db.notes=db.notes.filter(n=>n.cat!=c);cat="all";cur=null;open(null);save();render()}return}
-if(g("data-cat")){cat=g("data-cat");tab="notes";render()}else if(g("data-n")){open(g("data-n"))}else if(g("data-td")){const o=db.todos.find(z=>z.id==g("data-td"));o.done=o.done?0:1;save();tasks()}else if(g("data-dt")){db.todos=db.todos.filter(z=>z.id!=g("data-dt"));save();tasks()}
+if(g("data-lk"))return;
+if(g("data-dc")){const c=g("data-dc"),k=db.notes.filter(n=>n.cat==c).length;(async()=>{if(db.cats.find(z=>z.id==c)?.lk&&!await gate())return;if(k?!(await ask(t("delc1").replace("{n}",k))&&await ask(t("delc2"))):!await ask(t("confirm")))return;db.cats=db.cats.filter(z=>z.id!=c);db.notes=db.notes.filter(n=>n.cat!=c);cat="all";cur=null;open(null);save();render()})();return}
+if(g("data-cat")){(async()=>{const c=g("data-cat");if(db.cats.find(z=>z.id==c)?.lk&&!await gate())return;cat=c;tab="notes";render()})()}else if(g("data-n")){open(g("data-n"))}else if(g("data-td")){const o=db.todos.find(z=>z.id==g("data-td"));o.done=o.done?0:1;save();tasks()}else if(g("data-dt")){db.todos=db.todos.filter(z=>z.id!=g("data-dt"));save();tasks()}
 else if(B?.dataset.tab){tab=B.dataset.tab;render()}
 else if(B?.id=="theme"){db.theme=db.theme=="dark"?"light":"dark";save();render()}else if(B?.id=="lang"){db.lang=db.lang=="fr"?"en":"fr";save();render()}
 else if(B?.id=="addcat"){const n=prompt(t("catname"));if(n?.trim()){db.cats.push({id:uid(),name:n.trim()});save();render()}}
-else if(B?.id=="new"){const n={id:uid(),cat:cat=="all"?db.cats[0]?.id:cat,title:"",html:"",ts:Date.now()};if(!n.cat)return;db.notes.push(n);save();open(n.id);$("#ttl").focus();render()}
-else if(B?.id=="about"){const d=$("#dlg");d.innerHTML=`<h2>Notia</h2><p>v1.0.0 — ${t("by")} <a href="https://srichard.site" id="site">Song Richard</a></p><p>${t("tt")}</p><button id="x">${t("close")}</button>`;d.showModal();$("#site").onclick=v=>{v.preventDefault();open_("https://srichard.site")};$("#x").onclick=()=>d.close()}
+else if(B?.id=="new"){const n={id:uid(),cat:cat=="all"?db.cats[0]?.id:cat,title:"",html:"",ts:Date.now(),cr:Date.now()};if(!n.cat)return;db.notes.push(n);save();open(n.id);$("#ttl").focus();render()}
+else if(B?.id=="about"){const d=$("#dlg");d.innerHTML=`<h2>Notia</h2><p>v${VER} — ${t("by")} <a href="https://srichard.site" id="site">Song Richard</a></p><p>${t("tt")}</p><p><button id="don" class="pri">☕ ${t("donate")}</button></p><button id="x">${t("close")}</button>`;d.showModal();$("#site").onclick=v=>{v.preventDefault();open_("https://srichard.site")};$("#don").onclick=()=>open_(DONATE);$("#x").onclick=()=>d.close()}
 else if(B?.dataset.c){const c=B.dataset.c;if(!cur&&c!="print")return;({bold:()=>x("bold"),italic:()=>x("italic"),underline:()=>x("underline"),hl:()=>x("hiliteColor","#fde047"),mono:()=>x("fontName","Consolas"),
 sm:()=>x("fontSize",Math.max(1,(+document.queryCommandValue("fontSize")||3)-1)),lg:()=>x("fontSize",Math.min(7,(+document.queryCommandValue("fontSize")||3)+1)),img:()=>$("#file").click(),print:()=>window.print(),
 mail:()=>open_("mailto:?subject="+encodeURIComponent($("#ttl").value)+"&body="+encodeURIComponent(ed.innerText.slice(0,1500))),
-del:()=>{if(confirm(t("confirm"))){db.notes=db.notes.filter(n=>n.id!=cur);save();open(null)}}})[c]?.()}});
+del:async()=>{if(await ask(t("confirm"))){db.notes=db.notes.filter(n=>n.id!=cur);save();open(null)}}})[c]?.()}});
 $("#font").onchange=e=>cur&&x("fontName",e.target.value);$("#exp").onchange=e=>{exp(e.target.value);e.target.value=""};$("#file").onchange=e=>e.target.files[0]&&img(e.target.files[0]);
 $$(".bar button").forEach(b=>b.onmousedown=e=>e.preventDefault());
 render();open(null);

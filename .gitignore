@@ -3,3 +3,4 @@ src/vendor
 src-tauri/target
 src-tauri/icons
 src-tauri/gen
+CHANGES-1.2.1.md

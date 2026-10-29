@@ -1,4 +1,48 @@
-{"$schema":"https://schema.tauri.app/config/2","productName":"Notia","version":"1.1.0","identifier":"site.srichard.notia",
-"build":{"frontendDist":"../src"},
-"app":{"withGlobalTauri":true,"windows":[{"title":"Notia","width":1240,"height":800,"minWidth":900,"minHeight":600}],"security":{"csp":"default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost"}},
-"bundle":{"active":true,"targets":["nsis"],"icon":["icons/32x32.png","icons/128x128.png","icons/icon.ico"],"licenseFile":"../LICENSE.txt","publisher":"Song Richard","windows":{"nsis":{"languages":["English","French"],"displayLanguageSelector":true,"installMode":"currentUser"}}}}
+{
+ "$schema": "https://schema.tauri.app/config/2",
+ "productName": "Notia",
+ "version": "1.2.0",
+ "identifier": "site.srichard.notia",
+ "build": {
+  "frontendDist": "../src"
+ },
+ "app": {
+  "withGlobalTauri": true,
+  "windows": [
+   {
+    "title": "Notia",
+    "width": 1240,
+    "height": 800,
+    "minWidth": 900,
+    "minHeight": 600
+   }
+  ],
+  "security": {
+   "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; worker-src 'self' blob:; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost https://api.github.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
+  }
+ },
+ "bundle": {
+  "active": true,
+  "targets": [
+   "nsis"
+  ],
+  "icon": [
+   "icons/32x32.png",
+   "icons/128x128.png",
+   "icons/icon.ico"
+  ],
+  "licenseFile": "../LICENSE.txt",
+  "publisher": "Song Richard",
+  "windows": {
+   "nsis": {
+    "languages": [
+     "English",
+     "French"
+    ],
+    "displayLanguageSelector": true,
+    "installMode": "currentUser",
+    "installerHooks": "hooks.nsh"
+   }
+  }
+ }
+}

@@ -1,1 +1,14 @@
-{"identifier":"default","windows":["main"],"permissions":["core:default","dialog:default","opener:default","notification:default","autostart:default"]}
+{
+ "identifier": "default",
+ "windows": [
+  "main"
+ ],
+ "permissions": [
+  "core:default",
+  "dialog:default",
+  "opener:default",
+  "notification:default",
+  "autostart:default",
+  "core:window:allow-set-fullscreen"
+ ]
+}

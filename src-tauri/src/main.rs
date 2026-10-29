@@ -1,9 +1,54 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::{io::{Read, Write}, net::{TcpListener, UdpSocket}, sync::atomic::{AtomicBool, Ordering}, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
-use tauri::{menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent}, Manager, WindowEvent};
+use std::{path::Path, sync::Mutex};
+use tauri::{menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent}, Emitter, Manager, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
 static STOP: AtomicBool = AtomicBool::new(false);
+static PENDING: Mutex<Option<String>> = Mutex::new(None);
+
+fn file_arg(args: &[String]) -> Option<String> {
+    args.iter().skip(1).find(|a| !a.starts_with("--") && Path::new(a.as_str()).is_file()).cloned()
+}
+
+#[tauri::command]
+fn take_open_file() -> Option<String> { PENDING.lock().ok()?.take() }
+
+// Hides the window from screenshots, screen recorders and AI screen-capture tools (Windows 10 2004+).
+#[tauri::command]
+fn privacy(app: tauri::AppHandle, on: bool) {
+    if let Some(w) = app.get_webview_window("main") { let _ = w.set_content_protected(on); }
+}
+
+fn backups_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app.path().document_dir().map_err(|e| e.to_string())?.join("Notia Backups"))
+}
+
+#[tauri::command]
+fn backup_write(app: tauri::AppHandle, name: String, data: Vec<u8>) -> Result<String, String> {
+    let d = backups_dir(&app)?;
+    std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+    let safe: String = name.chars().filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c)).collect();
+    if !safe.ends_with(".ntia") { return Err("bad name".into()); }
+    let p = d.join(&safe);
+    std::fs::write(&p, data).map_err(|e| e.to_string())?;
+    let mut all = backup_files(&d);
+    all.sort_by(|a, b| b.cmp(a));
+    for old in all.iter().skip(7) { let _ = std::fs::remove_file(d.join(old)); }
+    Ok(p.display().to_string())
+}
+
+fn backup_files(d: &Path) -> Vec<String> {
+    std::fs::read_dir(d).map(|r| r.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n.ends_with(".ntia")).collect()).unwrap_or_default()
+}
+
+#[tauri::command]
+fn backup_list(app: tauri::AppHandle) -> Vec<(String, String)> {
+    let Ok(d) = backups_dir(&app) else { return vec![] };
+    let mut v = backup_files(&d);
+    v.sort_by(|a, b| b.cmp(a));
+    v.into_iter().map(|n| { let p = d.join(&n).display().to_string(); (n, p) }).collect()
+}
 
 #[tauri::command]
 async fn save_file(app: tauri::AppHandle, name: String, data: Vec<u8>) -> Result<bool, String> {
@@ -18,6 +63,9 @@ async fn save_file(app: tauri::AppHandle, name: String, data: Vec<u8>) -> Result
 
 #[tauri::command]
 fn read_file(path: String) -> Result<tauri::ipc::Response, String> {
+    // Only ebooks and Notia backups can be read from disk.
+    let ext = Path::new(&path).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    if !["pdf", "epub", "mobi", "azw", "ntia"].contains(&ext.as_str()) { return Err("File type not allowed".into()); }
     std::fs::read(path).map(tauri::ipc::Response::new).map_err(|e| e.to_string())
 }
 
@@ -77,12 +125,17 @@ fn show(app: &tauri::AppHandle) {
 }
 
 fn main() {
+    *PENDING.lock().unwrap() = file_arg(&std::env::args().collect::<Vec<_>>());
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if let Some(p) = file_arg(&args) { let _ = app.emit("open-file", p); }
+            show(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
-        .invoke_handler(tauri::generate_handler![save_file, read_file, bluetooth_send, share_start, share_stop])
+        .invoke_handler(tauri::generate_handler![save_file, read_file, bluetooth_send, share_start, share_stop, take_open_file, privacy, backup_write, backup_list])
         .setup(|app| {
             let open = MenuItem::with_id(app, "show", "Open Notia", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -94,8 +147,9 @@ fn main() {
                 .on_menu_event(|a, e| match e.id.as_ref() { "show" => show(a), "quit" => a.exit(0), _ => {} })
                 .on_tray_icon_event(|t, e| if let TrayIconEvent::DoubleClick { .. } = e { show(t.app_handle()) })
                 .build(app)?;
-            if std::env::args().any(|a| a == "--hidden") {
-                if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_content_protected(true); // privacy shield on by default; the UI can turn it off
+                if std::env::args().any(|a| a == "--hidden") && PENDING.lock().map(|p| p.is_none()).unwrap_or(true) { let _ = w.hide(); }
             }
             Ok(())
         })
