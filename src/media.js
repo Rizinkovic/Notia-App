@@ -8,7 +8,14 @@ ca_alg:["Algebra","Algèbre"],ca_cal:["Calculus","Analyse"],ca_trg:["Trigonometr
 const ea=s=>String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
 let editing=null;
 function modal(html){let d=$("#md");if(!d){d=document.createElement("dialog");d.id="md";d.className="big";document.body.append(d);d.onclose=()=>{d.innerHTML=""}}d.innerHTML=html;if(!d.open)d.showModal();return d}
-function putFig(kind,data,svg){if(editing){editing.dataset.j=JSON.stringify(data);editing.innerHTML=svg;editing=null;touch()}else{ed.focus();x("insertHTML",`<figure class="fig" data-k="${kind}" data-j="${ea(JSON.stringify(data))}" contenteditable="false">${svg}</figure><p><br></p>`)}}
+let lastR=null;document.addEventListener("selectionchange",()=>{const s=getSelection();if(s.rangeCount&&ed.contains(s.anchorNode))lastR=s.getRangeAt(0).cloneRange()});
+function putFig(kind,data,svg){if(editing){editing.dataset.j=JSON.stringify(data);editing.innerHTML=svg;editing=null;touch();return}
+const md=$("#md");if(md?.open)md.close();/* the editor is inert while a modal dialog is open: close it first */
+const h=`<figure class="fig" data-k="${kind}" data-j="${ea(JSON.stringify(data))}" contenteditable="false">${svg}</figure><p><br></p>`,n0=ed.querySelectorAll(".fig").length;
+ed.focus();const s=getSelection();if(lastR&&ed.contains(lastR.startContainer)&&!(s.rangeCount&&ed.contains(s.anchorNode))){s.removeAllRanges();s.addRange(lastR)}
+let ok=false;try{ok=document.execCommand("insertHTML",false,h)}catch{}
+if(!ok||ed.querySelectorAll(".fig").length<=n0){const t=document.createElement("template");t.innerHTML=h;ed.append(t.content)}/* fallback: append at the end of the note */
+touch()}
 ed.addEventListener("dblclick",e=>{const f=e.target.closest(".fig"),m=e.target.closest(".mf");if(f&&ed.contains(f)){editing=f;const j=JSON.parse(f.dataset.j);f.dataset.k=="chart"?openChart(j):openDraw(j)}else if(m&&ed.contains(m))openMath(m)});
 // ================= DIAGRAM EDITOR =================
 const clone=o=>JSON.parse(JSON.stringify(o));

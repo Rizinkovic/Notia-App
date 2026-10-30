@@ -136,7 +136,7 @@ if(q("[data-j]"))return jump(book.hl.find(z=>z.id==q("[data-j]").dataset.j).u,q(
 if(q("[data-jb]")){const b=book.bm.find(z=>z.id==q("[data-jb]").dataset.jb);return jump(b.u)}
 if(q("[data-su]")){await jump(+q("[data-su]").dataset.su);markQ()}});
 addEventListener("keydown",e=>{if(tab=="lib"&&!book&&!e.target.matches("input,textarea")&&db.lib.view!="list"){if(e.key=="ArrowRight"){CI++;cfPos()}if(e.key=="ArrowLeft"){CI--;cfPos()}if(e.key=="Enter"&&db.lib.books[CI])openBook(db.lib.books[CI].id)}
-if(!book||!R||$("#viewer").hidden)return;const k=e.key,K=k.toLowerCase(),inp=e.target.matches("input,textarea"),h=f=>{e.preventDefault();e.stopImmediatePropagation();f()};
+if(!book||!R||$("#viewer").hidden||tab!="lib"||$("#lib").hidden||e.target.isContentEditable)return;const k=e.key,K=k.toLowerCase(),inp=e.target.matches("input,textarea,select"),h=f=>{e.preventDefault();e.stopImmediatePropagation();f()};
 if(e.ctrlKey){if(K=="l")return h(fsToggle);if(K=="f")return h(()=>{panel("s");$("#sq").focus()});if(K=="d")return h(bmToggle);if(k=="+"||k=="=")return h(()=>zoom(1));if(k=="-")return h(()=>zoom(-1));return}
 if(k=="Escape"){if(document.body.classList.contains("fs"))fsToggle();else $("#stb").hidden=true;return}if(inp)return;
 if(k=="ArrowDown")return h(()=>step(1));if(k=="ArrowUp")return h(()=>step(-1));if(k==" ")return h(()=>step(e.shiftKey?-1:1,true));if(k=="ArrowRight"||k=="PageDown")return h(nextU);if(k=="ArrowLeft"||k=="PageUp")return h(()=>prevU());
