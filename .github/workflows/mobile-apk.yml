@@ -5,6 +5,7 @@ on:
     branches:
       - mobile-app
       - feature/mobile-qr-sync-apk
+      - fix/mobile-app-release-size-qr
     paths:
       - "**"
   workflow_dispatch:
@@ -35,20 +36,43 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Check TypeScript
+        run: npm run typecheck
+
       - name: Generate Android project
         run: npx expo prebuild --platform android --no-install --clean
 
-      - name: Build installable debug APK
+      # prebuild --clean regenerates gradle.properties, so apply the
+      # release-only size settings after it has finished.
+      - name: Configure optimized arm64 release
+        run: |
+          cat >> android/gradle.properties <<'EOF'
+          reactNativeArchitectures=arm64-v8a
+          android.enableMinifyInReleaseBuilds=true
+          android.enableShrinkResourcesInReleaseBuilds=true
+          expo.useLegacyPackaging=true
+          EOF
+
+      - name: Build standalone release APK
         run: |
           chmod +x android/gradlew
           cd android
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=2
+
+      - name: Report APK size
+        run: |
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          SIZE="$(stat -c%s "$APK")"
+          echo "APK_SIZE_BYTES=$SIZE" >> "$GITHUB_ENV"
+          echo "APK size: $(numfmt --to=iec-i --suffix=B "$SIZE") ($SIZE bytes)"
+          sha256sum "$APK"
 
       - name: Publish APK as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Notia-Mobile-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: Notia-Mobile-arm64-Release-APK
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -56,8 +80,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "notia-mobile-build-${{ github.run_number }}" android/app/build/outputs/apk/debug/app-debug.apk \
+          cp android/app/build/outputs/apk/release/app-release.apk Notia-Mobile-arm64.apk
+          gh release create "notia-mobile-release-${{ github.run_number }}" Notia-Mobile-arm64.apk \
             --repo "${{ github.repository }}" \
-            --title "Notia Mobile APK #${{ github.run_number }}" \
-            --notes "Automatically built Android debug APK from commit ${{ github.sha }}." \
-            --latest
+            --title "Notia Mobile arm64 Release #${{ github.run_number }}" \
+            --notes "Standalone arm64 release APK. Built from commit ${{ github.sha }}. APK size: ${APK_SIZE_BYTES} bytes. This sideload build is not signed with a Play Store upload key."
