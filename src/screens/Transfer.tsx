@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TextInput, Pressable, Switch, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, TextInput, Pressable, Switch, ScrollView, ActivityIndicator, StyleSheet, Alert } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Crypto from 'expo-crypto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../store';
 import { L } from '../i18n';
-import { PORT, myIp, parseTargets, sendTo, startServer, toPayload } from '../net';
+import { PORT, myIp, parseTargets, sendTo, startServer, toPayload, cleanIncoming } from '../net';
 
 export default function Transfer({ route, navigation }: any) {
   const { s, th, importNotes } = useApp();
@@ -20,6 +21,10 @@ export default function Transfer({ route, navigation }: any) {
   const [ip, setIp] = useState('');
   const [got, setGot] = useState(0);
   const [err, setErr] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const scanned = useRef(false);
   const srv = useRef<{ stop: () => void } | null>(null);
   const imp = useRef(importNotes);
   imp.current = importNotes;
@@ -46,6 +51,30 @@ export default function Transfer({ route, navigation }: any) {
     srv.current = h; setCode(c); setIp(await myIp()); setGot(0); setRx(true);
   };
 
+  const startScan = async () => {
+    const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
+    if (!permission.granted) return Alert.alert(L(l, 'Camera permission required', 'Autorisation caméra requise'), L(l, 'Allow camera access to scan the desktop QR code.', 'Autorisez l’accès à la caméra pour scanner le QR code du bureau.'));
+    scanned.current = false; setScanBusy(false); setScanning(true);
+  };
+  const onQr = async ({ data }: { data: string }) => {
+    if (scanned.current || scanBusy) return;
+    scanned.current = true; setScanBusy(true);
+    try {
+      const url = new URL(data);
+      if (url.protocol !== 'http:' || !/^\/[a-f0-9]{32}\/notes$/.test(url.pathname)) throw new Error('This is not a valid Notia sync QR code.');
+      const response = await fetch(data);
+      if (!response.ok) throw new Error('Desktop not reachable. Check same Wi-Fi and keep desktop sharing open.');
+      const incoming = cleanIncoming(await response.json());
+      if (!incoming.length) throw new Error('No valid notes found in this sync session.');
+      const count = importNotes(incoming);
+      setScanning(false);
+      Alert.alert(L(l, 'Sync complete', 'Synchronisation terminée'), L(l, `${count} note(s) imported or updated.`, `${count} note(s) importée(s) ou mise(s) à jour.`));
+    } catch (e: any) {
+      Alert.alert(L(l, 'Sync failed', 'Échec de la synchronisation'), String(e?.message ?? e));
+      scanned.current = false;
+    } finally { setScanBusy(false); }
+  };
+
   const card = { backgroundColor: th.card, borderColor: th.line, borderWidth: 1, borderRadius: 22, padding: 16, gap: 10 } as const;
   return (
     <View style={{ flex: 1, backgroundColor: th.bg, paddingTop: ins.top }}>
@@ -53,7 +82,19 @@ export default function Transfer({ route, navigation }: any) {
         <Pressable onPress={() => navigation.goBack()} hitSlop={12}><Ionicons name="chevron-back" size={26} color={th.ink} /></Pressable>
         <Text style={{ color: th.ink, fontSize: 22, fontWeight: '800' }}>{L(l, 'Wi-Fi transfer', 'Transfert Wi-Fi')}</Text>
       </View>
+      {scanning ? <View style={{ position: 'absolute', zIndex: 20, top: 52, bottom: 0, left: 0, right: 0, backgroundColor: '#000' }}>
+        <CameraView style={{ flex: 1 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={onQr} />
+        <View style={{ padding: 18, gap: 12 }}>
+          <Text style={{ color: '#fff', textAlign: 'center' }}>{scanBusy ? L(l, 'Connecting and importing notes…', 'Connexion et importation des notes…') : L(l, 'Point your camera at the QR code displayed by Notia Desktop.', 'Pointez la caméra vers le QR code affiché par Notia Desktop.')}</Text>
+          <Pressable onPress={() => setScanning(false)} style={{ backgroundColor: '#fff', padding: 14, borderRadius: 14 }}><Text style={{ color: '#111', textAlign: 'center', fontWeight: '800' }}>{L(l, 'Cancel', 'Annuler')}</Text></Pressable>
+        </View>
+      </View> : null}
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: ins.bottom + 40, gap: 14 }} keyboardShouldPersistTaps="handled">
+        <View style={card}>
+          <Text style={{ color: th.ink, fontWeight: '800', fontSize: 16 }}>{L(l, 'Sync from desktop', 'Synchroniser depuis le bureau')}</Text>
+          <Text style={{ color: th.sub }}>{L(l, 'Scan the QR code shown by Notia Desktop. Only one scan is needed. Both devices must be on the same Wi-Fi.', 'Scannez le QR code affiché par Notia Desktop. Un seul scan suffit. Les deux appareils doivent être sur le même Wi-Fi.')}</Text>
+          <Pressable onPress={startScan} style={{ height: 46, borderRadius: 23, backgroundColor: th.accent, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: th.accentInk, fontWeight: '800' }}>{L(l, 'Scan desktop QR code', 'Scanner le QR code du bureau')}</Text></Pressable>
+        </View>
         <View style={card}>
           <Text style={{ color: th.ink, fontWeight: '800', fontSize: 16 }}>{L(l, 'Send notes', 'Envoyer des notes')}</Text>
           {s.notes.length === 0 ? <Text style={{ color: th.sub }}>{L(l, 'No notes yet.', 'Aucune note.')}</Text> : null}
