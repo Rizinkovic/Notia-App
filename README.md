@@ -2,8 +2,8 @@
 
 ## Run
 1. Install Node.js 20+ and start your Android emulator.
-2. Windows: double-click `run.bat` (Mac/Linux: `sh run.sh`). Or: `npm install` then `npx expo start --android`.
-3. Edit in VS Code; the app hot-reloads. Check types any time with `npm run typecheck`.
+2. Windows: double-click `run.bat` (Mac/Linux: `sh run.sh`). Or: `npm ci` then `npx expo start --android`.
+3. Edit in VS Code; the app hot-reloads. Check types with `npm run typecheck`.
 
 ## Code map (src/)
 | File | What it does |
@@ -12,60 +12,54 @@
 | screens/Notes, Editor, EditorTools | list + rich editor; link / table / formula / chart sheets; share & export sheet |
 | tools.ts | formula evaluator (no eval), table + chart (SVG) builders, HTML sanitiser |
 | docx.ts / exporter.ts | HTML -> .docx (pure JS), PDF + DOCX + text sharing |
-| net.ts / screens/Transfer | Wi-Fi send/receive |
+| net.ts / screens/Transfer | Wi-Fi send/receive and one-scan desktop QR import |
 | screens/Library, Reader, library.tsx, readerHtml.ts | books, reading stats, highlights, bookmarks, daily reminder |
 | screens/Tasks, tasks.ts | tasks + reminders |
 | screens/Vault | PIN / password vault |
 
-## Android APK from GitHub
-Every push to `mobile-app` (and this feature branch) triggers **Build Notia Android APK**. When it finishes, download `app-debug.apk` from the workflow run's Artifacts section or from the latest GitHub Release named **Notia Mobile APK**. The APK is built on GitHub's runner; Android Studio is not required on your PC. This is a debug-signed installable APK, not a Play Store release.
+## Standalone Android APK
+Every push to `mobile-app` triggers **Build Notia Android APK**. The workflow runs TypeScript checks, generates the native Android project, and builds a standalone **Release** APK (JavaScript is bundled; Metro is not required at runtime).
+
+The downloadable artifact is named **Notia-Mobile-arm64-Release-APK**. It targets 64-bit ARM Android phones to avoid packaging emulator and legacy CPU libraries into the same APK. It uses Hermes, R8 code shrinking, resource shrinking, and compressed native libraries. This is a sideload build signed with the repository's debug key; it is not suitable for Play Store publishing. A Play Store build needs a private release keystore.
+
+The exact APK size is reported in the Actions log and will be measured on every build. The 20 MB target is a strict optimization goal, not a size that can be guaranteed from source configuration alone: React Native, Hermes, Expo native modules, and the bundled offline reader all contribute to the final binary. No app feature or reader engine is intentionally removed to chase the size target.
 
 ## One-scan desktop QR sync
-On desktop, open Share and choose **Sync notes to phone (QR)**. In mobile, open Transfer and tap **Scan desktop QR code**. Notes are imported or updated by ID; newer versions replace older ones. Both devices must be on the same Wi-Fi. No database or cloud backend is used. Keep the desktop share dialog open until import finishes.
+On desktop, open Share and choose **Sync notes to phone (QR)**. In mobile, open Transfer and tap **Scan desktop QR code**. One scan imports or updates notes by ID; newer versions replace older ones. Both devices must be on the same Wi-Fi, and the desktop share dialog must remain open until import finishes. The QR contains a temporary local-network URL and random token; no cloud backend or second scan is involved.
+
+The mobile scanner checks the Notia URL format, requests the note payload with a timeout, validates the JSON structure, sanitises incoming HTML, and imports the notes. The QR transfer is a desktop-to-phone operation; it does not replace the separate manual Wi-Fi send/receive tools.
 
 ## Wi-Fi transfer
-Both devices on the same Wi-Fi. **Sending** works everywhere (Expo Go included).
-**Receiving** needs a raw TCP server, which Expo Go cannot run, so build a development client once (no Android Studio needed):
-```
-npx expo install expo-dev-client expo-build-properties
-```
-add to app.json -> expo.plugins: `["expo-build-properties", { "android": { "usesCleartextTraffic": true } }]`, then
-```
-npx eas-cli build --profile development --platform android   (cloud build; free Expo account)
-```
-install the resulting APK on the emulator and run `npx expo start --dev-client`.
+Both devices must be on the same Wi-Fi. **Sending** works in Expo Go.
+**Receiving** needs a raw TCP server, which Expo Go cannot run. It requires a native build containing `react-native-tcp-socket`; the standalone APK includes this module.
 
-### Protocol (for the Notia desktop app, PC <-> phone)
+### Protocol (PC <-> phone)
 ```
 POST http://<receiver-ip>:8765/notia/v1/notes
 X-Notia-Code: <4-digit code displayed by the receiver>
 {"v":1,"notes":[{"id":"abc","title":"...","html":"...","category":"Work"|null,"created":1730000000000,"modified":1730000000000}]}
 -> 200 {"ok":true,"count":N} | 401 wrong code | 400 bad body
 ```
-The desktop app can send with a plain HTTP POST, and can receive by running the same endpoint on its own port.
-Incoming HTML is sanitised (scripts, event handlers, javascript: links removed). A note with the same id is only overwritten by a newer one.
+Incoming HTML is sanitised (scripts, event handlers, and javascript: links removed). A note with the same ID is only overwritten by a newer one.
 
 ## Notes
 - Charts export to Word as data tables (Word has no SVG chart from HTML); in PDF they stay graphical.
+- Exports are written to the app cache folder, then shared. If the share sheet fails, PDF falls back to the system print dialog ("Save as PDF").
 
 ## Loading screen / icon
-The app shows the Notia logo while it loads (in-app screen, works everywhere). The native Android splash from `app.json` only appears in a built APK / development build — Expo Go always shows its own splash first.
+The app shows the Notia logo while it loads. The native Android splash from `app.json` only appears in a built APK / development build — Expo Go shows its own splash first.
 
 ## Books
-Supported: **PDF, EPUB, MOBI / AZW / PRC, DOCX, TXT, HTML**. Not supported (convert to EPUB with Calibre): DRM-protected books, KF8-only AZW3, FB2, CBZ, DJVU, DOC, RTF.
-- Adding a book copies it into the app's own storage (several fallback strategies, so it works with Downloads, Drive, USB and cloud providers). Max 60 MB per book, 10 books.
-- If adding fails, the message now includes the real system error so it can be diagnosed.
-- Covers: the real cover is extracted (PDF first page, EPUB / MOBI cover image). Formats with no image (DOCX, TXT, HTML) get a generated title cover. Covers appear as soon as the book is opened once; a generated cover is replaced if a real one is found later.
-- In EPUBs, table-of-contents and in-text links jump inside the book; web links open in the browser.
-- Highlights are re-applied when a book is reopened (text books; PDFs are images, so highlights are only listed).
+Supported: **PDF, EPUB, MOBI / AZW / PRC, DOCX, TXT, HTML**. DRM-protected books and KF8-only AZW3 are not supported; convert unsupported formats to EPUB with Calibre.
+- Adding a book copies it into the app's own storage. Several fallback strategies support Downloads, Drive, USB and cloud providers. Maximum: 60 MB per book and 10 books.
+- Covers are extracted from PDF, EPUB and MOBI where available; DOCX, TXT and HTML use generated title covers.
+- EPUB table-of-contents and in-text links jump inside the book; web links open in the browser.
+- Text-book highlights are reapplied when reopened. PDF highlights are listed because PDF pages are rendered as images.
 
 ## Reader (offline)
-PDF, EPUB and DOCX engines are bundled in `src/readerLibs.ts` (generated from npm: pdfjs-dist, jszip, mammoth); MOBI, TXT and HTML are parsed by `src/readerHtml.ts` itself. Book HTML is sanitised (scripts, inline handlers, hard-coded colours removed). PDF pages are rendered on demand and released when far off-screen to keep memory low.
+PDF, EPUB and DOCX engines are bundled in `src/readerLibs.ts` (pdfjs-dist, jszip, mammoth); MOBI, TXT and HTML are parsed by `src/readerHtml.ts`. Book HTML is sanitised. PDF pages are rendered on demand and released when far off-screen to reduce memory use.
 
 ## Reminders
-Android 13+ needs a notification channel before it will show the permission prompt; Tasks creates it first. Use the bell icon on the Tasks screen to fire a test notification in 5 seconds.
-
-## PDF / Word export
-Exports are written to the app's own cache folder, then shared. If the share sheet fails, PDF falls back to the system print dialog ("Save as PDF").
+Android 13+ needs a notification channel before it will show the permission prompt. Tasks creates it first. Use the bell icon on the Tasks screen to fire a test notification in 5 seconds.
 
 <!-- GitHub Actions APK build configuration is in .github/workflows/mobile-apk.yml. -->
