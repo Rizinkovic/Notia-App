@@ -138,6 +138,7 @@ fn share_notes_start(payload: String, token: String) -> Result<String, String> {
         s.local_addr()
     }).map(|a| a.ip().to_string()).unwrap_or_else(|_| "127.0.0.1".into());
     let route = format!("/{}/notes", token);
+    let server_route = route.clone();
     let body = payload.into_bytes();
     thread::spawn(move || {
         while !STOP.load(Ordering::SeqCst) {
@@ -150,7 +151,7 @@ fn share_notes_start(payload: String, token: String) -> Result<String, String> {
             let count = stream.read(&mut request).unwrap_or(0);
             let line = String::from_utf8_lossy(&request[..count]);
             let path = line.split_whitespace().nth(1).unwrap_or("");
-            if line.starts_with("GET ") && path == route {
+            if line.starts_with("GET ") && path == server_route {
                 let header = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()
