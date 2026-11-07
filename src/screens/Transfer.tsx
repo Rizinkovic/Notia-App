@@ -61,8 +61,15 @@ export default function Transfer({ route, navigation }: any) {
     scanned.current = true; setScanBusy(true);
     try {
       const url = new URL(data);
-      if (url.protocol !== 'http:' || !/^\/[a-f0-9]{32}\/notes$/.test(url.pathname)) throw new Error('This is not a valid Notia sync QR code.');
-      const response = await fetch(data);
+      const localHost = /^(localhost|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})$/i.test(url.hostname);
+      if (url.protocol !== 'http:' || !localHost || !/^\/[a-f0-9]{32}\/notes$/.test(url.pathname) || url.username || url.password || url.search || url.hash) {
+        throw new Error('Invalid Notia sync QR code. Scan the code shown by Notia Desktop on your local Wi-Fi.');
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      let response: Response;
+      try { response = await fetch(url.toString(), { signal: controller.signal, headers: { Accept: 'application/json' } }); }
+      finally { clearTimeout(timeout); }
       if (!response.ok) throw new Error('Desktop not reachable. Check same Wi-Fi and keep desktop sharing open.');
       const incoming = cleanIncoming(await response.json());
       if (!incoming.length) throw new Error('No valid notes found in this sync session.');
@@ -70,7 +77,8 @@ export default function Transfer({ route, navigation }: any) {
       setScanning(false);
       Alert.alert(L(l, 'Sync complete', 'Synchronisation terminée'), L(l, `${count} note(s) imported or updated.`, `${count} note(s) importée(s) ou mise(s) à jour.`));
     } catch (e: any) {
-      Alert.alert(L(l, 'Sync failed', 'Échec de la synchronisation'), String(e?.message ?? e));
+      const message = e?.name === 'AbortError' ? 'Connection timed out. Check same Wi-Fi and keep desktop sharing open.' : String(e?.message ?? e);
+      Alert.alert(L(l, 'Sync failed', 'Échec de la synchronisation'), message);
       scanned.current = false;
     } finally { setScanBusy(false); }
   };
