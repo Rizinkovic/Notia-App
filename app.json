@@ -27,6 +27,12 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Notia to scan a desktop sync QR code."
+        }
+      ],
       "expo-sharing",
       "expo-secure-store",
       "@react-native-community/datetimepicker",
