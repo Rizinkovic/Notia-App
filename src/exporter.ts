@@ -9,7 +9,7 @@ type N = { title: string; html: string };
 const safe = (t: string) => (t.replace(/[^\p{L}\p{N}\- _]+/gu, '').trim().slice(0, 40).trim() || 'note');
 
 export const noteHtml = (n: N) =>
-  `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:24px;line-height:1.5;color:#111}img{max-width:100%}table{border-collapse:collapse;width:100%}td,th{border:1px solid #999;padding:6px}code,pre{font-family:monospace;background:#f2f2f2}mark{background:#ffe27a}</style></head><body><h1>${n.title.replace(/</g, '&lt;')}</h1>${n.html}</body></html>`;
+  `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:24px;line-height:1.5;color:#111}img{max-width:100%}table{border-collapse:collapse;width:100%}td,th{border:1px solid #999;padding:6px}code,pre{font-family:monospace;background:#f2f2f2}mark{background:#ffe27a}</style></head><body><h1>${n.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</h1>${n.html}</body></html>`;
 
 async function shareFile(uri: string, mimeType: string, UTI?: string) {
   if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing is not available on this device.');
