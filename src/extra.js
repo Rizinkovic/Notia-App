@@ -18,7 +18,7 @@ $("#tl").innerHTML=`<div class="mh"><button data-pm="-1">‹</button><b>${pm.toL
 // ---- Export / PDF writer / share
 async function exp(k){if(!cur_()||!k)return;try{const[nm,d]=await pack(k);await I("save_file",{name:nm,data:[...d]})}catch(e){toast(String(e))}}
 function shareDlg(){if(!cur)return;const d=$("#dlg");d.innerHTML=`<h3>${t("share")}</h3><label>${t("fmt")} <select id="sf"><option>md</option><option>pdf</option><option>txt</option></select></label><div class="sg"><button data-sh="qr">▦ ${t("qr")}</button><button data-sh="wifi">📶 ${t("wifi")}</button><button data-sh="bt">🔵 ${t("bt")}</button><button data-sh="tg">✈️ Telegram</button><button data-sh="wa">💬 WhatsApp</button><button data-sh="mail">✉️ ${t("mail")}</button><button data-sh="drive">☁️ ${t("drive")}</button></div><p id="shm"></p><button id="x">${t("close")}</button>`;d.showModal();d.onclose=()=>{try{I("share_stop")}catch{}};$("#x").onclick=()=>d.close()}
-async function share(k){const n=cur_(),T=n.title||t("untitled"),f=$("#sf").value,[nm,d]=await pack(f),m=$("#shm"),body=enc((f=="txt"?ed.innerText:"# "+T+"\n\n"+md(ed.innerHTML)).slice(0,3000));
+async function share(k){const n=cur_(),T=n.title||t("untitled"),f=$("#sf").value,m=$("#shm"),body=enc((f=="txt"?ed.innerText:"# "+T+"\n\n"+md(ed.innerHTML)).slice(0,3000));
 try{if(k=="qr"){
 const token=Array.from(crypto.getRandomValues(new Uint8Array(16))).map(v=>v.toString(16).padStart(2,"0")).join("");
 const payload=JSON.stringify({v:1,notes:db.notes.map(x=>({id:x.id,title:x.title||"",html:x.html||"",category:db.cats.find(c=>c.id===x.cat)?.name??null,created:x.cr||x.ts||Date.now(),modified:x.ts||Date.now()}))});
@@ -27,9 +27,9 @@ const url=await I("share_notes_start",{payload,token});
 const svg=await I("qr_svg",{text:url});
 m.innerHTML='<div style="background:#fff;padding:12px;border-radius:12px;width:min(320px,70vw);margin:12px auto">'+svg+'</div><p style="text-align:center">'+t("qrhelp")+'</p><small style="display:block;text-align:center;word-break:break-all">'+url+'</small>';
 }
-else if(k=="wifi")m.innerHTML=`<b>${await I("share_start",{files:[[nm,[...d]]]})}</b><br>${t("wifihelp")}`;
-else if(k=="bt"){await I("bluetooth_send",{name:nm,data:[...d]});m.textContent=t("bthelp")}
-else if(k=="drive"){await I("save_file",{name:nm,data:[...d]});open_("https://drive.google.com/drive/my-drive");m.textContent=t("drivehelp")}
+else if(k=="wifi"){const[nm,d]=await pack(f);m.innerHTML=`<b>${await I("share_start",{files:[[nm,[...d]]]})}</b><br>${t("wifihelp")}`;}
+else if(k=="bt"){const[nm,d]=await pack(f);await I("bluetooth_send",{name:nm,data:[...d]});m.textContent=t("bthelp")}
+else if(k=="drive"){const[nm,d]=await pack(f);await I("save_file",{name:nm,data:[...d]});open_("https://drive.google.com/drive/my-drive");m.textContent=t("drivehelp")}
 else open_(k=="tg"?`https://t.me/share/url?url=%20&text=${body}`:k=="wa"?`https://wa.me/?text=${body}`:`mailto:?subject=${enc(T)}&body=${body}`)}catch(e){toast(String(e))}}
 // ---- Tutorial
 function tour(i=0){const s=t("steps"),d=$("#dlg"),last=i==s.length-1;d.innerHTML=`<h2>${s[i][0]}</h2><p>${s[i][1]}</p><div class="sg"><button id="sk">${t("skip")}</button><button class="pri" id="nx">${last?t("done"):t("next")}</button></div><small>${i+1}/${s.length}</small>`;if(!d.open)d.showModal();$("#sk").onclick=()=>d.close();$("#nx").onclick=()=>last?d.close():tour(i+1);db.tour=1;save()}
