@@ -17,6 +17,9 @@
 | screens/Tasks, tasks.ts | tasks + reminders |
 | screens/Vault | PIN / password vault |
 
+## One-scan desktop QR sync
+On desktop, open Share and choose **Sync notes to phone (QR)**. In mobile, open Transfer and tap **Scan desktop QR code**. Notes are imported or updated by ID; newer versions replace older ones. Both devices must be on the same Wi-Fi. No database or cloud backend is used. Keep the desktop share dialog open until import finishes.
+
 ## Wi-Fi transfer
 Both devices on the same Wi-Fi. **Sending** works everywhere (Expo Go included).
 **Receiving** needs a raw TCP server, which Expo Go cannot run, so build a development client once (no Android Studio needed):
