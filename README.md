@@ -17,6 +17,9 @@
 | screens/Tasks, tasks.ts | tasks + reminders |
 | screens/Vault | PIN / password vault |
 
+## Android APK from GitHub
+Every push to `mobile-app` (and this feature branch) triggers **Build Notia Android APK**. When it finishes, download `app-debug.apk` from the workflow run's Artifacts section or from the latest GitHub Release named **Notia Mobile APK**. The APK is built on GitHub's runner; Android Studio is not required on your PC. This is a debug-signed installable APK, not a Play Store release.
+
 ## One-scan desktop QR sync
 On desktop, open Share and choose **Sync notes to phone (QR)**. In mobile, open Transfer and tap **Scan desktop QR code**. Notes are imported or updated by ID; newer versions replace older ones. Both devices must be on the same Wi-Fi. No database or cloud backend is used. Keep the desktop share dialog open until import finishes.
 
