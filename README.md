@@ -67,3 +67,5 @@ Android 13+ needs a notification channel before it will show the permission prom
 
 ## PDF / Word export
 Exports are written to the app's own cache folder, then shared. If the share sheet fails, PDF falls back to the system print dialog ("Save as PDF").
+
+<!-- GitHub Actions APK build configuration is in .github/workflows/mobile-apk.yml. -->
