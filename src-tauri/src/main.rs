@@ -3,6 +3,7 @@ use std::{io::{Read, Write}, net::{TcpListener, UdpSocket}, sync::atomic::{Atomi
 use std::{path::Path, sync::Mutex};
 use tauri::{menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent}, Emitter, Manager, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
+use qrcode::{QrCode, render::svg};
 
 static STOP: AtomicBool = AtomicBool::new(false);
 static PENDING: Mutex<Option<String>> = Mutex::new(None);
@@ -120,6 +121,56 @@ fn share_start(files: Vec<(String, Vec<u8>)>) -> Result<String, String> {
     Ok(format!("http://{}:{}/{}/", ip, port, tok))
 }
 
+#[tauri::command]
+fn share_notes_start(payload: String, token: String) -> Result<String, String> {
+    if payload.len() > 20_000_000 { return Err("Notes payload is too large (20 MB maximum)".into()); }
+    if token.len() != 32 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Invalid one-time sharing token".into());
+    }
+    STOP.store(true, Ordering::SeqCst);
+    thread::sleep(Duration::from_millis(250));
+    STOP.store(false, Ordering::SeqCst);
+    let listener = TcpListener::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let ip = UdpSocket::bind("0.0.0.0:0").and_then(|s| {
+        s.connect("8.8.8.8:80")?;
+        s.local_addr()
+    }).map(|a| a.ip().to_string()).unwrap_or_else(|_| "127.0.0.1".into());
+    let route = format!("/{}/notes", token);
+    let body = payload.into_bytes();
+    thread::spawn(move || {
+        while !STOP.load(Ordering::SeqCst) {
+            let Ok((mut stream, _)) = listener.accept() else {
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            };
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+            let mut request = [0u8; 4096];
+            let count = stream.read(&mut request).unwrap_or(0);
+            let line = String::from_utf8_lossy(&request[..count]);
+            let path = line.split_whitespace().nth(1).unwrap_or("");
+            if line.starts_with("GET ") && path == route {
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(header.as_bytes());
+                let _ = stream.write_all(&body);
+            } else {
+                let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            }
+        }
+    });
+    Ok(format!("http://{}:{}{}", ip, port, route))
+}
+
+#[tauri::command]
+fn qr_svg(text: String) -> Result<String, String> {
+    let code = QrCode::new(text.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(code.render::<svg::Color>().min_dimensions(280, 280).build())
+}
+
 fn show(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); }
 }
@@ -135,7 +186,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
-        .invoke_handler(tauri::generate_handler![save_file, read_file, bluetooth_send, share_start, share_stop, take_open_file, privacy, backup_write, backup_list])
+        .invoke_handler(tauri::generate_handler![save_file, read_file, bluetooth_send, share_start, share_notes_start, qr_svg, share_stop, take_open_file, privacy, backup_write, backup_list])
         .setup(|app| {
             let open = MenuItem::with_id(app, "show", "Open Notia", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
