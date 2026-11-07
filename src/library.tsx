@@ -70,7 +70,15 @@ export function LibProvider({ children, lang }: { children: React.ReactNode; lan
     return id;
   }, []);
   const patch = useCallback<Ctx['patch']>((id, p) => setBooks(bs => bs.map(b => b.id === id ? { ...b, ...(typeof p === 'function' ? p(b) : p) } : b)), []);
-  const remove = useCallback((id: string) => setBooks(p => p.filter(b => b.id !== id)), []);
+  const remove = useCallback((id: string) => {
+    const target = books.find(b => b.id === id);
+    setBooks(p => p.filter(b => b.id !== id));
+    // Remove the copied book file as well as its metadata. Keep it if another
+    // library entry still points to the same stored filename.
+    if (target && !books.some(b => b.id !== id && b.uri === target.uri)) {
+      FS.deleteAsync(bookPath(target.uri), { idempotent: true }).catch(() => {});
+    }
+  }, [books]);
   const ackPurged = useCallback(() => setPurged(0), []);
   const value = useMemo(() => ({ books, ready, purged, ackPurged, add, patch, remove }), [books, ready, purged, ackPurged, add, patch, remove]);
   return <C.Provider value={value}>{children}</C.Provider>;
