@@ -78,7 +78,6 @@ fn bluetooth_send(name: String, data: Vec<u8>) -> Result<(), String> {
     std::process::Command::new("fsquirt").spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
 // Pick an address another device on the local network can reach.
 // Never advertise loopback (127.0.0.1): that points back to the receiving device.
 fn lan_ipv4() -> Result<String, String> {
@@ -95,6 +94,8 @@ fn lan_ipv4() -> Result<String, String> {
     candidates.into_iter().next().map(|(_, ip)| ip)
         .ok_or_else(|| "No private LAN IPv4 address found. Connect this computer to the same Wi-Fi network as your phone and try again.".to_string())
 }
+
+#[tauri::command]
 fn share_stop() { STOP.store(true, Ordering::SeqCst); }
 
 #[tauri::command]
