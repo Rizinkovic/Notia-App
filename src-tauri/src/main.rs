@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use std::{io::{Read, Write}, net::{TcpListener, UdpSocket}, sync::atomic::{AtomicBool, Ordering}, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{io::{Read, Write}, net::{IpAddr, TcpListener}, sync::atomic::{AtomicBool, Ordering}, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
 use std::{path::Path, sync::Mutex};
 use tauri::{menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent}, Emitter, Manager, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -79,6 +79,22 @@ fn bluetooth_send(name: String, data: Vec<u8>) -> Result<(), String> {
 }
 
 #[tauri::command]
+// Pick an address another device on the local network can reach.
+// Never advertise loopback (127.0.0.1): that points back to the receiving device.
+fn lan_ipv4() -> Result<String, String> {
+    let interfaces = local_ip_address::list_afinet_netifas().map_err(|e| format!("Could not inspect network interfaces: {e}"))?;
+    let mut candidates: Vec<(u8, String)> = interfaces.into_iter().filter_map(|(name, addr)| {
+        let IpAddr::V4(ip) = addr else { return None; };
+        if ip.is_loopback() || ip.is_unspecified() || !ip.is_private() { return None; }
+        let n = name.to_ascii_lowercase();
+        let preference = if n.contains("wi-fi") || n.contains("wifi") || n.contains("wireless") || n.contains("wlan") { 0 }
+            else if n.contains("ethernet") || n.contains("en0") { 1 } else { 2 };
+        Some((preference, ip.to_string()))
+    }).collect();
+    candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    candidates.into_iter().next().map(|(_, ip)| ip)
+        .ok_or_else(|| "No private LAN IPv4 address found. Connect this computer to the same Wi-Fi network as your phone and try again.".to_string())
+}
 fn share_stop() { STOP.store(true, Ordering::SeqCst); }
 
 #[tauri::command]
@@ -89,8 +105,7 @@ fn share_start(files: Vec<(String, Vec<u8>)>) -> Result<String, String> {
     let l = TcpListener::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
     l.set_nonblocking(true).map_err(|e| e.to_string())?;
     let port = l.local_addr().map_err(|e| e.to_string())?.port();
-    let ip = UdpSocket::bind("0.0.0.0:0").and_then(|s| { s.connect("8.8.8.8:80")?; s.local_addr() })
-        .map(|a| a.ip().to_string()).unwrap_or_else(|_| "127.0.0.1".into());
+    let ip = lan_ipv4()?;
     let tok = format!("{:x}", SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1) ^ port as u64);
     let t2 = tok.clone();
     thread::spawn(move || {
@@ -133,10 +148,7 @@ fn share_notes_start(payload: String, token: String) -> Result<String, String> {
     let listener = TcpListener::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let ip = UdpSocket::bind("0.0.0.0:0").and_then(|s| {
-        s.connect("8.8.8.8:80")?;
-        s.local_addr()
-    }).map(|a| a.ip().to_string()).unwrap_or_else(|_| "127.0.0.1".into());
+    let ip = lan_ipv4()?;
     let route = format!("/{}/notes", token);
     let server_route = route.clone();
     let body = payload.into_bytes();
