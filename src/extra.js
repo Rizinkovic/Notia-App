@@ -27,7 +27,7 @@ const url=await I("share_notes_start",{payload,token});
 const svg=await I("qr_svg",{text:url});
 m.innerHTML='<div style="background:#fff;padding:12px;border-radius:12px;width:min(320px,70vw);margin:12px auto">'+svg+'</div><p style="text-align:center">'+t("qrhelp")+'</p><small style="display:block;text-align:center;word-break:break-all">'+url+'</small>';
 }
-else if(k=="wifi"){const[nm,d]=await pack(f);m.innerHTML=`<b>${await I("share_start",{files:[[nm,[...d]]]})}</b><br>${t("wifihelp")}`;}
+else if(k=="wifi"){const[nm,d]=await pack(f);const url=await I("share_start",{files:[[nm,[...d]]]});const svg=await I("qr_svg",{text:url});m.innerHTML='<div style="background:#fff;padding:12px;border-radius:12px;width:min(320px,70vw);margin:12px auto">'+svg+'</div><p style="text-align:center">'+t("wifihelp")+'</p><small style="display:block;text-align:center;word-break:break-all">'+url+'</small>';}
 else if(k=="bt"){const[nm,d]=await pack(f);await I("bluetooth_send",{name:nm,data:[...d]});m.textContent=t("bthelp")}
 else if(k=="drive"){const[nm,d]=await pack(f);await I("save_file",{name:nm,data:[...d]});open_("https://drive.google.com/drive/my-drive");m.textContent=t("drivehelp")}
 else open_(k=="tg"?`https://t.me/share/url?url=%20&text=${body}`:k=="wa"?`https://wa.me/?text=${body}`:`mailto:?subject=${enc(T)}&body=${body}`)}catch(e){toast(String(e))}}
