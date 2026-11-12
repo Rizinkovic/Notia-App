@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Notia" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/splash_bg</item>
+        <item name="android:colorAccent">#8B6CF6</item>
+        <item name="android:colorControlActivated">#8B6CF6</item>
+    </style>
+</resources>
