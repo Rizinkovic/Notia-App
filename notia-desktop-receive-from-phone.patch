@@ -1,0 +1,134 @@
+diff --git a/src-tauri/src/main.rs b/src-tauri/src/main.rs
+index 57a4bcc..41a0d8a 100644
+--- a/src-tauri/src/main.rs
++++ b/src-tauri/src/main.rs
+@@ -179,6 +179,73 @@ fn share_notes_start(payload: String, token: String) -> Result<String, String> {
+     Ok(format!("http://{}:{}{}", ip, port, route))
+ }
+ 
++#[tauri::command]
++fn receive_notes_start(app: tauri::AppHandle, token: String) -> Result<String, String> {
++    // Phone -> desktop: the phone scans the QR code and POSTs {"v":1,"notes":[...]} to /<token>/inbox.
++    if token.len() != 32 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
++        return Err("Invalid one-time sharing token".into());
++    }
++    STOP.store(true, Ordering::SeqCst);
++    thread::sleep(Duration::from_millis(250));
++    STOP.store(false, Ordering::SeqCst);
++    let listener = TcpListener::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
++    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
++    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
++    let ip = lan_ipv4()?;
++    let route = format!("/{}/inbox", token);
++    let server_route = route.clone();
++    thread::spawn(move || {
++        const NOT_FOUND: &[u8] = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
++        const BAD: &[u8] = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
++        while !STOP.load(Ordering::SeqCst) {
++            let Ok((mut stream, _)) = listener.accept() else {
++                thread::sleep(Duration::from_millis(100));
++                continue;
++            };
++            let _ = stream.set_nonblocking(false);
++            let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
++            let mut buf: Vec<u8> = Vec::new();
++            let mut tmp = [0u8; 4096];
++            let mut head_end = None;
++            while head_end.is_none() && buf.len() < 16_384 {
++                let n = stream.read(&mut tmp).unwrap_or(0);
++                if n == 0 { break; }
++                buf.extend_from_slice(&tmp[..n]);
++                head_end = buf.windows(4).position(|w| w == b"\r\n\r\n");
++            }
++            let Some(he) = head_end else { let _ = stream.write_all(BAD); continue };
++            let head = String::from_utf8_lossy(&buf[..he]).to_string();
++            let mut first = head.lines().next().unwrap_or("").split_whitespace();
++            let (method, path) = (first.next().unwrap_or(""), first.next().unwrap_or(""));
++            if method != "POST" || path != server_route { let _ = stream.write_all(NOT_FOUND); continue; }
++            let len = head.lines().find_map(|l| {
++                let (k, v) = l.split_once(':')?;
++                if k.eq_ignore_ascii_case("content-length") { v.trim().parse::<usize>().ok() } else { None }
++            }).unwrap_or(0);
++            if len == 0 || len > 20_000_000 { let _ = stream.write_all(BAD); continue; }
++            let mut body = buf[he + 4..].to_vec();
++            while body.len() < len {
++                let n = stream.read(&mut tmp).unwrap_or(0);
++                if n == 0 { break; }
++                body.extend_from_slice(&tmp[..n]);
++            }
++            if body.len() < len { let _ = stream.write_all(BAD); continue; }
++            body.truncate(len);
++            match String::from_utf8(body) {
++                Ok(text) => {
++                    let _ = app.emit("notes-received", text);
++                    let ok = b"{\"ok\":true}";
++                    let head = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", ok.len());
++                    let _ = stream.write_all(head.as_bytes());
++                    let _ = stream.write_all(ok);
++                }
++                Err(_) => { let _ = stream.write_all(BAD); }
++            }
++        }
++    });
++    Ok(format!("http://{}:{}{}", ip, port, route))
++}
++
+ #[tauri::command]
+ fn qr_svg(text: String) -> Result<String, String> {
+     let code = QrCode::new(text.as_bytes()).map_err(|e| e.to_string())?;
+@@ -200,7 +267,7 @@ fn main() {
+         .plugin(tauri_plugin_opener::init())
+         .plugin(tauri_plugin_notification::init())
+         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
+-        .invoke_handler(tauri::generate_handler![save_file, read_file, bluetooth_send, share_start, share_notes_start, qr_svg, share_stop, take_open_file, privacy, backup_write, backup_list])
++        .invoke_handler(tauri::generate_handler![save_file, read_file, bluetooth_send, share_start, share_notes_start, receive_notes_start, qr_svg, share_stop, take_open_file, privacy, backup_write, backup_list])
+         .setup(|app| {
+             let open = MenuItem::with_id(app, "show", "Open Notia", true, None::<&str>)?;
+             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+diff --git a/src/extra.js b/src/extra.js
+index 0770faf..c569121 100644
+--- a/src/extra.js
++++ b/src/extra.js
+@@ -17,8 +17,8 @@ for(let d=1;d<=n;d++){const k=`${y}-${String(m+1).padStart(2,"0")}-${String(d).p
+ $("#tl").innerHTML=`<div class="mh"><button data-pm="-1">‹</button><b>${pm.toLocaleDateString(db.lang,{month:"long",year:"numeric"})}</b><button data-pm="1">›</button></div><div class="mg">${c}</div>`};
+ // ---- Export / PDF writer / share
+ async function exp(k){if(!cur_()||!k)return;try{const[nm,d]=await pack(k);await I("save_file",{name:nm,data:[...d]})}catch(e){toast(String(e))}}
+-function shareDlg(){const d=$("#dlg");d.innerHTML=`<h3>${t("share")}</h3><label>${t("fmt")} <select id="sf"><option>md</option><option>pdf</option><option>txt</option></select></label><div class="sg"><button data-sh="qr">▦ ${t("qr")}</button><button data-sh="wifi">📶 ${t("wifi")}</button><button data-sh="bt">🔵 ${t("bt")}</button><button data-sh="tg">✈️ Telegram</button><button data-sh="wa">💬 WhatsApp</button><button data-sh="mail">✉️ ${t("mail")}</button><button data-sh="drive">☁️ ${t("drive")}</button></div><p id="shm"></p><button id="x">${t("close")}</button>`;d.showModal();d.onclose=()=>{try{I("share_stop")}catch{}};$("#x").onclick=()=>d.close()}
+-async function share(k){const n=cur_(),T=n?.title||t("untitled"),f=$("#sf").value,m=$("#shm"),body=enc((f=="txt"?(ed?.innerText||""):"# "+T+"\n\n"+md(ed?.innerHTML||"")).slice(0,3000));if(k!=="qr"&&!n){m.textContent=db.lang==="fr"?"Sélectionnez une note pour partager un fichier.":"Select a note to share a file.";return}
++function shareDlg(){const d=$("#dlg");d.innerHTML=`<h3>${t("share")}</h3><label>${t("fmt")} <select id="sf"><option>md</option><option>pdf</option><option>txt</option></select></label><div class="sg"><button data-sh="qr">▦ ${t("qr")}</button><button data-sh="rx">▦ ${t("rx")}</button><button data-sh="wifi">📶 ${t("wifi")}</button><button data-sh="bt">🔵 ${t("bt")}</button><button data-sh="tg">✈️ Telegram</button><button data-sh="wa">💬 WhatsApp</button><button data-sh="mail">✉️ ${t("mail")}</button><button data-sh="drive">☁️ ${t("drive")}</button></div><p id="shm"></p><button id="x">${t("close")}</button>`;d.showModal();d.onclose=()=>{try{I("share_stop")}catch{}};$("#x").onclick=()=>d.close()}
++async function share(k){const n=cur_(),T=n?.title||t("untitled"),f=$("#sf").value,m=$("#shm"),body=enc((f=="txt"?(ed?.innerText||""):"# "+T+"\n\n"+md(ed?.innerHTML||"")).slice(0,3000));if(k!=="qr"&&k!=="rx"&&!n){m.textContent=db.lang==="fr"?"Sélectionnez une note pour partager un fichier.":"Select a note to share a file.";return}
+ try{if(k=="qr"){
+ const token=Array.from(crypto.getRandomValues(new Uint8Array(16))).map(v=>v.toString(16).padStart(2,"0")).join("");
+ const payload=JSON.stringify({v:1,notes:db.notes.map(x=>({id:x.id,title:x.title||"",html:x.html||"",category:db.cats.find(c=>c.id===x.cat)?.name??null,created:x.cr||x.ts||Date.now(),modified:x.ts||Date.now()}))});
+@@ -27,6 +27,11 @@ const url=await I("share_notes_start",{payload,token});
+ const svg=await I("qr_svg",{text:url});
+ m.innerHTML='<div style="background:#fff;padding:12px;border-radius:12px;width:min(320px,70vw);margin:12px auto">'+svg+'</div><p style="text-align:center">'+t("qrhelp")+'</p><small style="display:block;text-align:center;word-break:break-all">'+url+'</small>';
+ }
++else if(k=="rx"){
++const token=Array.from(crypto.getRandomValues(new Uint8Array(16))).map(v=>v.toString(16).padStart(2,"0")).join("");
++const url=await I("receive_notes_start",{token});const svg=await I("qr_svg",{text:url});
++m.innerHTML='<div style="background:#fff;padding:12px;border-radius:12px;width:min(320px,70vw);margin:12px auto">'+svg+'</div><p style="text-align:center">'+t("rxhelp")+'</p><small style="display:block;text-align:center;word-break:break-all">'+url+'</small>';
++}
+ else if(k=="wifi"){const[nm,d]=await pack(f);const url=await I("share_start",{files:[[nm,[...d]]]});const svg=await I("qr_svg",{text:url});m.innerHTML='<div style="background:#fff;padding:12px;border-radius:12px;width:min(320px,70vw);margin:12px auto">'+svg+'</div><p style="text-align:center">'+t("wifihelp")+'</p><small style="display:block;text-align:center;word-break:break-all">'+url+'</small>';}
+ else if(k=="bt"){const[nm,d]=await pack(f);await I("bluetooth_send",{name:nm,data:[...d]});m.textContent=t("bthelp")}
+ else if(k=="drive"){const[nm,d]=await pack(f);await I("save_file",{name:nm,data:[...d]});open_("https://drive.google.com/drive/my-drive");m.textContent=t("drivehelp")}
+@@ -49,3 +54,19 @@ if(q("[data-day]")){$("#nd").value=q("[data-day]").dataset.day+"T09:00";return $
+ if(q("#about"))setTimeout(async()=>{let on=false;try{on=await TR.autostart.isEnabled()}catch{}$("#dlg").insertAdjacentHTML("beforeend",`<p><label><input type="checkbox" id="as" ${on?"checked":""}> ${t("start")}</label></p>`);$("#as").onchange=ev=>TR.autostart[ev.target.checked?"enable":"disable"]()},50)});
+ addEventListener("keydown",e=>{if(!e.ctrlKey)return;const k=e.key.toLowerCase();if(k=="n"){e.preventDefault();tab="notes";render();$("#new").click()}if(k=="f"&&!e.shiftKey&&!window.book){e.preventDefault();tab="notes";render();$("#q").focus()}if(k=="p"&&tab=="notes"){e.preventDefault();print()}});
+ render();if(!db.tour)tour();
++// ---- phone -> desktop: notes arrive from Notia Mobile through the "Receive notes from phone" QR code ----
++Object.assign(L.en,{rx:"Receive notes from phone (QR)",rxhelp:"Open Notia Mobile → Transfer → tick notes → Scan desktop QR code and send. Both devices must be on the same Wi-Fi. Keep this window open until the notes arrive.",rxgot:"note(s) received from phone"});
++Object.assign(L.fr,{rx:"Recevoir des notes du téléphone (QR)",rxhelp:"Ouvrez Notia Mobile → Transfert → cochez des notes → Scanner le QR du bureau et envoyer. Les deux appareils doivent être sur le même Wi-Fi. Gardez cette fenêtre ouverte jusqu’à l’arrivée des notes.",rxgot:"note(s) reçue(s) du téléphone"});
++function rxClean(h){const d=new DOMParser().parseFromString(h,"text/html");
++d.querySelectorAll("script,style,link,meta,iframe,object,embed,form,base,title,audio,video").forEach(n=>n.remove());
++d.querySelectorAll("*").forEach(n=>[...n.attributes].forEach(a=>{if(/^on/i.test(a.name)||/^\s*(javascript|vbscript):/i.test(a.value))n.removeAttribute(a.name)}));return d.body.innerHTML}
++function mergeIncoming(raw){let o;try{o=JSON.parse(raw)}catch{return}
++if(!o||o.v!==1||!Array.isArray(o.notes))return;let n=0;
++for(const x of o.notes.slice(0,200)){const id=String(x.id||"").replace(/[^\w-]/g,"").slice(0,40);if(!id)continue;
++let c=null;const cn=typeof x.category==="string"?x.category.trim().slice(0,30):"";
++if(cn){c=db.cats.find(z=>z.name.toLowerCase()==cn.toLowerCase());if(!c){c={id:uid(),name:cn};db.cats.push(c)}}
++c??=db.cats[0];if(!c)continue;
++const mod=Number(x.modified)||Date.now(),cr=Number(x.created)||mod,html=rxClean(String(x.html||"").slice(0,5e6)),title=String(x.title||"").slice(0,200),ex=db.notes.find(z=>z.id==id);
++if(ex){if(mod>ex.ts){ex.title=title;ex.html=html;ex.cat=c.id;ex.ts=mod;n++}}else{db.notes.push({id,cat:c.id,title,html,ts:mod,cr});n++}}
++save();render();toast("✓ "+n+" "+t("rxgot"))}
++try{TR.event.listen("notes-received",e=>mergeIncoming(e.payload))}catch{}

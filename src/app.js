@@ -3,7 +3,7 @@ const L={en:{notes:"Notes",tasks:"Tasks & Planner",newcat:"+ Category",about:"Ab
 fr:{notes:"Notes",tasks:"Tâches & Planning",newcat:"+ Catégorie",about:"À propos",all:"Toutes les notes",newnote:"+ Nouvelle note",search:"Rechercher…",title:"Titre",add:"Ajouter",untitled:"Sans titre",tdesc:"Nouvelle tâche…",close:"Fermer",by:"Créé par",tt:"Conditions : Notia est fournie « telle quelle », sans garantie. Vos notes restent sur cet appareil ; rien n’est envoyé en ligne.",catname:"Nom de la catégorie",cats:["Prompts","Idées d’apps","Livres à lire","Films à voir"],confirm:"Supprimer ?",none:"Sans date",due:"Rappel"}};
 const lg=navigator.language.startsWith("fr")?"fr":"en";
 const FRESH=!localStorage.notia;let db;try{db=JSON.parse(localStorage.notia)}catch{}
-const SEALED=!!db?.sealed,PREF=(()=>{try{return JSON.parse(localStorage.notia_pref)}catch{return{}}})();
+const SEALED=db?.sealed===1,PREF=(()=>{try{return JSON.parse(localStorage.notia_pref)}catch{return{}}})();
 if(SEALED)db={lang:PREF.lang||lg,theme:PREF.theme||"light",cats:[],notes:[],todos:[],tour:1};
 db=db||{lang:lg,theme:"light",cats:L[lg].cats.map((n,i)=>({id:"c"+i,name:n})),notes:[],todos:[]};
 let cat="all",cur=null,tab="notes";const ed=$("#ed"),t=k=>L[db.lang][k],uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);

@@ -1,8 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use std::{io::{Read, Write}, net::{TcpListener, UdpSocket}, sync::atomic::{AtomicBool, Ordering}, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{io::{Read, Write}, net::{IpAddr, TcpListener}, sync::atomic::{AtomicBool, Ordering}, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
 use std::{path::Path, sync::Mutex};
 use tauri::{menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent}, Emitter, Manager, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
+use qrcode::{QrCode, render::svg};
 
 static STOP: AtomicBool = AtomicBool::new(false);
 static PENDING: Mutex<Option<String>> = Mutex::new(None);
@@ -77,6 +78,23 @@ fn bluetooth_send(name: String, data: Vec<u8>) -> Result<(), String> {
     std::process::Command::new("fsquirt").spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+// Pick an address another device on the local network can reach.
+// Never advertise loopback (127.0.0.1): that points back to the receiving device.
+fn lan_ipv4() -> Result<String, String> {
+    let interfaces = local_ip_address::list_afinet_netifas().map_err(|e| format!("Could not inspect network interfaces: {e}"))?;
+    let mut candidates: Vec<(u8, String)> = interfaces.into_iter().filter_map(|(name, addr)| {
+        let IpAddr::V4(ip) = addr else { return None; };
+        if ip.is_loopback() || ip.is_unspecified() || !ip.is_private() { return None; }
+        let n = name.to_ascii_lowercase();
+        let preference = if n.contains("wi-fi") || n.contains("wifi") || n.contains("wireless") || n.contains("wlan") { 0 }
+            else if n.contains("ethernet") || n.contains("en0") { 1 } else { 2 };
+        Some((preference, ip.to_string()))
+    }).collect();
+    candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    candidates.into_iter().next().map(|(_, ip)| ip)
+        .ok_or_else(|| "No private LAN IPv4 address found. Connect this computer to the same Wi-Fi network as your phone and try again.".to_string())
+}
+
 #[tauri::command]
 fn share_stop() { STOP.store(true, Ordering::SeqCst); }
 
@@ -88,8 +106,7 @@ fn share_start(files: Vec<(String, Vec<u8>)>) -> Result<String, String> {
     let l = TcpListener::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
     l.set_nonblocking(true).map_err(|e| e.to_string())?;
     let port = l.local_addr().map_err(|e| e.to_string())?.port();
-    let ip = UdpSocket::bind("0.0.0.0:0").and_then(|s| { s.connect("8.8.8.8:80")?; s.local_addr() })
-        .map(|a| a.ip().to_string()).unwrap_or_else(|_| "127.0.0.1".into());
+    let ip = lan_ipv4()?;
     let tok = format!("{:x}", SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1) ^ port as u64);
     let t2 = tok.clone();
     thread::spawn(move || {
@@ -120,6 +137,121 @@ fn share_start(files: Vec<(String, Vec<u8>)>) -> Result<String, String> {
     Ok(format!("http://{}:{}/{}/", ip, port, tok))
 }
 
+#[tauri::command]
+fn share_notes_start(payload: String, token: String) -> Result<String, String> {
+    if payload.len() > 20_000_000 { return Err("Notes payload is too large (20 MB maximum)".into()); }
+    if token.len() != 32 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Invalid one-time sharing token".into());
+    }
+    STOP.store(true, Ordering::SeqCst);
+    thread::sleep(Duration::from_millis(250));
+    STOP.store(false, Ordering::SeqCst);
+    let listener = TcpListener::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let ip = lan_ipv4()?;
+    let route = format!("/{}/notes", token);
+    let server_route = route.clone();
+    let body = payload.into_bytes();
+    thread::spawn(move || {
+        while !STOP.load(Ordering::SeqCst) {
+            let Ok((mut stream, _)) = listener.accept() else {
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            };
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+            let mut request = [0u8; 4096];
+            let count = stream.read(&mut request).unwrap_or(0);
+            let line = String::from_utf8_lossy(&request[..count]);
+            let path = line.split_whitespace().nth(1).unwrap_or("");
+            if line.starts_with("GET ") && path == server_route {
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(header.as_bytes());
+                let _ = stream.write_all(&body);
+            } else {
+                let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            }
+        }
+    });
+    Ok(format!("http://{}:{}{}", ip, port, route))
+}
+
+#[tauri::command]
+fn receive_notes_start(app: tauri::AppHandle, token: String) -> Result<String, String> {
+    // Phone -> desktop: the phone scans the QR code and POSTs {"v":1,"notes":[...]} to /<token>/inbox.
+    if token.len() != 32 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Invalid one-time sharing token".into());
+    }
+    STOP.store(true, Ordering::SeqCst);
+    thread::sleep(Duration::from_millis(250));
+    STOP.store(false, Ordering::SeqCst);
+    let listener = TcpListener::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let ip = lan_ipv4()?;
+    let route = format!("/{}/inbox", token);
+    let server_route = route.clone();
+    thread::spawn(move || {
+        const NOT_FOUND: &[u8] = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        const BAD: &[u8] = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        while !STOP.load(Ordering::SeqCst) {
+            let Ok((mut stream, _)) = listener.accept() else {
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            };
+            let _ = stream.set_nonblocking(false);
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+            let mut buf: Vec<u8> = Vec::new();
+            let mut tmp = [0u8; 4096];
+            let mut head_end = None;
+            while head_end.is_none() && buf.len() < 16_384 {
+                let n = stream.read(&mut tmp).unwrap_or(0);
+                if n == 0 { break; }
+                buf.extend_from_slice(&tmp[..n]);
+                head_end = buf.windows(4).position(|w| w == b"\r\n\r\n");
+            }
+            let Some(he) = head_end else { let _ = stream.write_all(BAD); continue };
+            let head = String::from_utf8_lossy(&buf[..he]).to_string();
+            let mut first = head.lines().next().unwrap_or("").split_whitespace();
+            let (method, path) = (first.next().unwrap_or(""), first.next().unwrap_or(""));
+            if method != "POST" || path != server_route { let _ = stream.write_all(NOT_FOUND); continue; }
+            let len = head.lines().find_map(|l| {
+                let (k, v) = l.split_once(':')?;
+                if k.eq_ignore_ascii_case("content-length") { v.trim().parse::<usize>().ok() } else { None }
+            }).unwrap_or(0);
+            if len == 0 || len > 20_000_000 { let _ = stream.write_all(BAD); continue; }
+            let mut body = buf[he + 4..].to_vec();
+            while body.len() < len {
+                let n = stream.read(&mut tmp).unwrap_or(0);
+                if n == 0 { break; }
+                body.extend_from_slice(&tmp[..n]);
+            }
+            if body.len() < len { let _ = stream.write_all(BAD); continue; }
+            body.truncate(len);
+            match String::from_utf8(body) {
+                Ok(text) => {
+                    let _ = app.emit("notes-received", text);
+                    let ok = b"{\"ok\":true}";
+                    let head = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", ok.len());
+                    let _ = stream.write_all(head.as_bytes());
+                    let _ = stream.write_all(ok);
+                }
+                Err(_) => { let _ = stream.write_all(BAD); }
+            }
+        }
+    });
+    Ok(format!("http://{}:{}{}", ip, port, route))
+}
+
+#[tauri::command]
+fn qr_svg(text: String) -> Result<String, String> {
+    let code = QrCode::new(text.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(code.render::<svg::Color>().min_dimensions(280, 280).build())
+}
+
 fn show(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); }
 }
@@ -135,7 +267,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
-        .invoke_handler(tauri::generate_handler![save_file, read_file, bluetooth_send, share_start, share_stop, take_open_file, privacy, backup_write, backup_list])
+        .invoke_handler(tauri::generate_handler![save_file, read_file, bluetooth_send, share_start, share_notes_start, receive_notes_start, qr_svg, share_stop, take_open_file, privacy, backup_write, backup_list])
         .setup(|app| {
             let open = MenuItem::with_id(app, "show", "Open Notia", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
